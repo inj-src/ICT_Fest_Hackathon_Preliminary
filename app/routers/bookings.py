@@ -202,6 +202,9 @@ def cancel_booking(
         raise AppError(409, "ALREADY_CANCELLED", "Booking already cancelled")
 
     now = datetime.utcnow()
+    if now >= booking.start_time:
+        raise AppError(400, "INVALID_CANCELLATION", "Cannot cancel past or ongoing bookings")
+        
     notice = booking.start_time - now
     notice_hours = int(notice.total_seconds() // 3600)
     if notice_hours >= 48:
@@ -225,7 +228,7 @@ def cancel_booking(
     _settlement_pause()
     db.commit()
 
-    stats.record_cancel(booking.room_id, booking.price_cents)
+    stats.record_cancel(booking.room_id, refund_amount_cents)
     cache.invalidate_report(user.org_id)
     cache.invalidate_availability(booking.room_id, booking.start_time.date().isoformat())
     notifications.notify_cancelled(booking)
