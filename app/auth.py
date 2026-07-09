@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import (
@@ -17,11 +18,7 @@ from .config import (
 )
 from .database import get_db
 from .errors import AppError
-from .models import User
-
-# Access tokens presented to /auth/logout are recorded here so they can no
-# longer be used.
-_revoked_tokens: set[str] = set()
+from .models import TokenState, User
 
 _PBKDF2_ROUNDS = 100_000
 
@@ -47,7 +44,7 @@ def _now_ts() -> int:
 
 def create_access_token(user: User) -> str:
     iat = _now_ts()
-    lifetime = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    lifetime = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user.id),
         "org": user.org_id,
@@ -82,11 +79,40 @@ def decode_token(token: str) -> dict:
         raise AppError(401, "UNAUTHORIZED", "Invalid or expired token")
 
 
-def revoke_access_token(payload: dict) -> None:
-    _revoked_tokens.add(payload["jti"])
+def _payload_expiry(payload: dict) -> datetime:
+    return datetime.fromtimestamp(int(payload["exp"]), timezone.utc).replace(tzinfo=None)
 
 
-def get_token_payload(request: Request) -> dict:
+def _record_token_state(db: Session, jti: str, token_type: str, expires_at: datetime) -> bool:
+    state = TokenState(jti=jti, token_type=token_type, expires_at=expires_at)
+    db.add(state)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return False
+    return True
+
+
+def revoke_access_token(db: Session, payload: dict) -> None:
+    _record_token_state(db, payload["jti"], "access", _payload_expiry(payload))
+
+
+def consume_refresh_token(db: Session, payload: dict) -> bool:
+    jti = payload.get("jti")
+    if not jti:
+        return False
+    return _record_token_state(db, jti, "refresh", _payload_expiry(payload))
+
+
+def is_token_recorded(db: Session, payload: dict) -> bool:
+    jti = payload.get("jti")
+    if not jti:
+        return False
+    return db.query(TokenState).filter(TokenState.jti == jti).first() is not None
+
+
+def get_token_payload(request: Request, db: Session = Depends(get_db)) -> dict:
     header = request.headers.get("Authorization")
     if not header or not header.startswith("Bearer "):
         raise AppError(401, "UNAUTHORIZED", "Missing bearer token")
@@ -94,7 +120,7 @@ def get_token_payload(request: Request) -> dict:
     payload = decode_token(token)
     if payload.get("type") != "access":
         raise AppError(401, "UNAUTHORIZED", "Wrong token type")
-    if payload.get("sub") in _revoked_tokens:
+    if is_token_recorded(db, payload):
         raise AppError(401, "UNAUTHORIZED", "Token has been revoked")
     return payload
 

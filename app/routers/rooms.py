@@ -54,6 +54,8 @@ def create_room(
     db.add(room)
     db.commit()
     db.refresh(room)
+    # A new room must appear in subsequent usage reports.
+    cache.invalidate_report(admin.org_id)
     return _serialize_room(room)
 
 
@@ -107,7 +109,7 @@ def room_stats(
     user: User = Depends(get_current_user),
 ):
     room = _get_org_room(db, room_id, user.org_id)
-    current = stats.get(room.id)
+    current = stats.get(db, room.id)
     return {
         "room_id": room.id,
         "total_confirmed_bookings": current["count"],
