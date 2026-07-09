@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
 from .config import (
@@ -86,11 +87,12 @@ def revoke_access_token(payload: dict) -> None:
     _revoked_tokens.add(payload["jti"])
 
 
-def get_token_payload(request: Request) -> dict:
-    header = request.headers.get("Authorization")
-    if not header or not header.startswith("Bearer "):
+security = HTTPBearer(auto_error=False)
+
+def get_token_payload(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    if not credentials:
         raise AppError(401, "UNAUTHORIZED", "Missing bearer token")
-    token = header[len("Bearer "):].strip()
+    token = credentials.credentials
     payload = decode_token(token)
     if payload.get("type") != "access":
         raise AppError(401, "UNAUTHORIZED", "Wrong token type")

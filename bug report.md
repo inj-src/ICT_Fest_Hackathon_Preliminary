@@ -123,3 +123,8 @@ This document outlines all 24 bugs discovered in the codebase, their root causes
 - **File / Line:** `app/services/export.py` (~Line 48)
 - **What:** When an admin queried `GET /admin/export?room_id=...&include_all=true`, the `generate_export` logic routed to `fetch_bookings_raw(db, room_id)` which omitted `org_id` filtering, leaking data across multi-tenant boundaries.
 - **Fix:** Replaced the `fetch_bookings_raw` branch with `_fetch_scoped(db, org_id, None, room_id)` which implicitly enforces the caller's `org_id`.
+
+### Bug 25: Swagger UI Authorization Integration
+- **File / Line:** `app/auth.py` (~Line 89)
+- **What:** The `get_token_payload` dependency manually extracted the token from `request.headers.get("Authorization")` instead of using FastAPI's official `HTTPBearer` security scheme. This resulted in Swagger UI failing to display the "Authorize" button, breaking the interactive docs for protected endpoints.
+- **Fix:** Updated the function to depend on `credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))` so Swagger UI natively supports token injection while preserving the original custom `AppError(401, ...)` logic.
