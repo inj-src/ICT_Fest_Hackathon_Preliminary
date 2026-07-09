@@ -128,3 +128,18 @@ This document outlines all 24 bugs discovered in the codebase, their root causes
 - **File / Line:** `app/auth.py` (~Line 89)
 - **What:** The `get_token_payload` dependency manually extracted the token from `request.headers.get("Authorization")` instead of using FastAPI's official `HTTPBearer` security scheme. This resulted in Swagger UI failing to display the "Authorize" button, breaking the interactive docs for protected endpoints.
 - **Fix:** Updated the function to depend on `credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False))` so Swagger UI natively supports token injection while preserving the original custom `AppError(401, ...)` logic.
+
+### Bug 26: Room Creation Negative Values
+- **File / Line:** `app/schemas.py` (~Line 21)
+- **What:** The `RoomCreateRequest` schema lacked constraint validation, allowing admins to create rooms with negative `capacity` and `hourly_rate_cents`, breaking booking constraints and generating negative revenue calculations.
+- **Fix:** Added Pydantic `Field(gt=0)` to `capacity` and `Field(ge=0)` to `hourly_rate_cents`.
+
+### Bug 27: Cancelling Past Bookings
+- **File / Line:** `app/routers/bookings.py` (~Line 205)
+- **What:** The `cancel_booking` endpoint allowed users to cancel bookings that were currently ongoing or had already happened in the past (calculating negative notice hours and yielding a 0% refund), thereby improperly marking historical data as "cancelled".
+- **Fix:** Added a strict time barrier `if datetime.utcnow() >= booking.start_time:` to raise a 400 `INVALID_CANCELLATION` error for past bookings.
+
+### Bug 28: Stats Revenue Cancellation Math
+- **File / Line:** `app/routers/bookings.py` (~Line 229)
+- **What:** When a booking was cancelled, `stats.record_cancel` was called with the full `booking.price_cents`. This incorrectly subtracted the entire price from the room's total revenue, even if only a partial (or zero) refund was issued to the user, causing revenue underreporting.
+- **Fix:** Changed the call to `stats.record_cancel(booking.room_id, refund_amount_cents)` so that only the actual refunded amount is subtracted from the room's total revenue pool.
