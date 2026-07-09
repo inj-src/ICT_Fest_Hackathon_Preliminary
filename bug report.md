@@ -143,3 +143,13 @@ This document outlines all 24 bugs discovered in the codebase, their root causes
 - **File / Line:** `app/routers/bookings.py` (~Line 229)
 - **What:** When a booking was cancelled, `stats.record_cancel` was called with the full `booking.price_cents`. This incorrectly subtracted the entire price from the room's total revenue, even if only a partial (or zero) refund was issued to the user, causing revenue underreporting.
 - **Fix:** Changed the call to `stats.record_cancel(booking.room_id, refund_amount_cents)` so that only the actual refunded amount is subtracted from the room's total revenue pool.
+
+### Bug 29: Access Token Expiration Math
+- **File / Line:** `app/auth.py` (~Line 51)
+- **What:** The `create_access_token` function multiplied `ACCESS_TOKEN_EXPIRE_MINUTES` (which is 15) by 60 when passing it to `timedelta(minutes=...)`. This accidentally granted access tokens a 900-minute (15-hour) lifespan instead of the intended 15-minute lifespan, violating security policies.
+- **Fix:** Removed the `* 60` multiplication so the timedelta correctly assigns a 15-minute lifespan.
+
+### Bug 30: Cross-Midnight Room Availability
+- **File / Line:** `app/routers/rooms.py` (~Line 86)
+- **What:** The `availability` query explicitly filtered for bookings where `Booking.start_time >= day_start`. This completely excluded bookings that started before midnight but ended during the queried day, falsely reporting those morning hours as available.
+- **Fix:** Replaced the `start_time >= day_start` constraint with `Booking.end_time > day_start` (paired with `Booking.start_time < day_end`) to properly calculate any overlapping time windows.
